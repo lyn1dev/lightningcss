@@ -941,13 +941,14 @@ impl MediaFeatureComparison {
     }
   }
 
-  fn negate(&self) -> MediaFeatureComparison {
+  fn negate(&self) -> Option<MediaFeatureComparison> {
     match self {
-      MediaFeatureComparison::GreaterThan => MediaFeatureComparison::LessThanEqual,
-      MediaFeatureComparison::GreaterThanEqual => MediaFeatureComparison::LessThan,
-      MediaFeatureComparison::LessThan => MediaFeatureComparison::GreaterThanEqual,
-      MediaFeatureComparison::LessThanEqual => MediaFeatureComparison::GreaterThan,
-      MediaFeatureComparison::Equal => MediaFeatureComparison::Equal,
+      MediaFeatureComparison::GreaterThan => Some(MediaFeatureComparison::LessThanEqual),
+      MediaFeatureComparison::GreaterThanEqual => Some(MediaFeatureComparison::LessThan),
+      MediaFeatureComparison::LessThan => Some(MediaFeatureComparison::GreaterThanEqual),
+      MediaFeatureComparison::LessThanEqual => Some(MediaFeatureComparison::GreaterThan),
+      // `=` has no inverse comparison, so a negated equality must keep its `not`.
+      MediaFeatureComparison::Equal => None,
     }
   }
 }
@@ -1162,7 +1163,7 @@ where
     match self {
       QueryFeature::Range { name, operator, value } => Some(QueryFeature::Range {
         name: (*name).clone(),
-        operator: operator.negate(),
+        operator: operator.negate()?,
         value: value.clone(),
       }),
       _ => None,
@@ -1906,6 +1907,19 @@ mod tests {
     MediaQuery::parse_with_options(&mut parser, &ParserOptions::default()).unwrap()
   }
 
+  fn print(s: &str) -> String {
+    parse(s).to_css_string(PrinterOptions::default()).unwrap()
+  }
+
+  fn print_minified(s: &str) -> String {
+    parse(s)
+      .to_css_string(PrinterOptions {
+        minify: true,
+        ..Default::default()
+      })
+      .unwrap()
+  }
+
   fn and(a: &str, b: &str) -> String {
     let mut a = parse(a);
     let b = parse(b);
@@ -1944,6 +1958,29 @@ mod tests {
     assert_eq!(and("all", "only screen"), "only screen");
     assert_eq!(and("only screen", "all"), "only screen");
     assert_eq!(and("print", "print"), "print");
+  }
+
+  #[test]
+  fn test_negated_equality_feature() {
+    // `=` has no inverse comparison, so the `not` must be preserved.
+    assert_eq!(print("not (width = 10px)"), "not (width = 10px)");
+    assert_eq!(print("screen and not (width = 10px)"), "screen and not (width = 10px)");
+    assert_eq!(
+      print("(not (width = 10px)) and (height > 5px)"),
+      "(not (width = 10px)) and (height > 5px)"
+    );
+    assert_eq!(print_minified("not (width = 10px)"), "not (width=10px)");
+    assert_eq!(
+      print_minified("screen and not (width = 10px)"),
+      "screen and not (width=10px)"
+    );
+
+    // Comparisons that have an inverse are still folded into the operator.
+    assert_eq!(print("not (width >= 10px)"), "(width < 10px)");
+    assert_eq!(print_minified("not (width >= 10px)"), "(width<10px)");
+
+    // Plain features keep their `not`.
+    assert_eq!(print("not (width: 10px)"), "not (width: 10px)");
   }
 
   #[test]
